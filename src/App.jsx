@@ -1,17 +1,19 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Dumbbell, ChevronRight, ChevronLeft, Camera, Utensils,
+  Dumbbell, ChevronRight, ChevronLeft, Utensils,
   Flame, Zap, Clock, Check, Plus, RotateCcw, Download,
   ChefHat, Coffee, Moon, Cookie,
   Heart, AlertCircle, Package,
-  Beef, Salad, Timer, BookOpen, Sparkles, Trophy
+  Beef, Salad, Timer, BookOpen, Sparkles, Trophy,
+  Edit3, Save, RefreshCw, FileText, Smartphone, Laptop, X, Share2
 } from 'lucide-react';
 import {
   DAYS, DAY_ABBREV, MUSCLE_GROUPS, MEALS, ROOM_ITEMS,
   EXERCISE_DB, DEFAULT_SPLIT, SAMPLE_VEG_MENU, SAMPLE_NONVEG_MENU,
   generateRecipes
 } from './data.js';
-import { extractMenuWithGemini, extractMenuWithTesseract, getStoredGeminiKey, storeGeminiKey } from './ocr.js';
+import { extractMenuWithTesseract } from './ocr.js';
+import { estimateDayMacros, estimateMealMacros, calculateProteinGap, processMenuNutrition, getGoalTargets } from './nutrition.js';
 
 // ========== LOCALSTORAGE HELPERS ==========
 const LS_KEY = 'gymforge_data';
@@ -19,7 +21,20 @@ const LS_KEY = 'gymforge_data';
 function loadState() {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const initial = createInitialState();
+    return {
+      ...initial,
+      ...parsed,
+      fitnessGoal: parsed?.fitnessGoal || 'LEAN',
+      split: { ...initial.split, ...(parsed?.split || {}) },
+      messMenu: DAYS.reduce((acc, day) => {
+        acc[day] = { ...initial.messMenu[day], ...(parsed?.messMenu?.[day] || {}) };
+        return acc;
+      }, {}),
+      workouts: parsed?.workouts || {},
+    };
   } catch { return null; }
 }
 
@@ -34,6 +49,7 @@ function createInitialState() {
   return {
     onboardingComplete: false,
     onboardingStep: 0,
+    fitnessGoal: 'LEAN',
     split: { ...DEFAULT_SPLIT },
     messMenu: DAYS.reduce((acc, day) => {
       acc[day] = { Breakfast: '', Lunch: '', 'Evening Snacks': '', Dinner: '' };
@@ -91,7 +107,6 @@ export default function App() {
       <OnboardingWizard
         state={state}
         update={update}
-        initWorkouts={initWorkouts}
       />
     );
   }
@@ -101,7 +116,7 @@ export default function App() {
 
 
 // ========== ONBOARDING WIZARD ==========
-function OnboardingWizard({ state, update, initWorkouts }) {
+function OnboardingWizard({ state, update }) {
   const step = state.onboardingStep;
   const totalSteps = 4;
   const progress = ((step + 1) / totalSteps) * 100;
@@ -241,30 +256,212 @@ function StepSplit({ state, update }) {
 }
 
 
+// ========== EDITABLE REVIEW TABLE COMPONENT ==========
+function EditableReviewTable({ initialMenu, onSave, onReupload, rawText }) {
+  const [tableData, setTableData] = useState(() => {
+    const menu = {};
+    DAYS.forEach(day => {
+      menu[day] = {};
+      MEALS.forEach(meal => {
+        menu[day][meal] = initialMenu?.[day]?.[meal] || 'Standard Mess Meal';
+      });
+    });
+    return menu;
+  });
+  const [savedSuccess, setSavedSuccess] = useState(false);
+
+  useEffect(() => {
+    if (initialMenu) {
+      const menu = {};
+      DAYS.forEach(day => {
+        menu[day] = {};
+        MEALS.forEach(meal => {
+          menu[day][meal] = initialMenu?.[day]?.[meal] || 'Standard Mess Meal';
+        });
+      });
+      setTableData(menu);
+    }
+  }, [initialMenu]);
+
+  const handleCellChange = (day, meal, newValue) => {
+    setTableData(prev => ({
+      ...prev,
+      [day]: {
+        ...prev[day],
+        [meal]: newValue
+      }
+    }));
+    setSavedSuccess(false);
+  };
+
+  const handleSave = () => {
+    onSave(tableData);
+    setSavedSuccess(true);
+    setTimeout(() => setSavedSuccess(false), 2500);
+  };
+
+  return (
+    <div className="glass-card p-4 space-y-4 animate-fadeIn border border-[#39FF14]/30">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-[var(--color-border-subtle)]">
+        <div>
+          <div className="flex items-center gap-2">
+            <Sparkles size={16} className="text-[#39FF14]" />
+            <h3 className="text-sm font-bold text-zinc-100 uppercase tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>
+              Editable Review Table
+            </h3>
+            <span className="text-[9px] bg-[#39FF14]/20 text-[#39FF14] px-2 py-0.5 rounded-full font-bold">
+              KEYLESS OCR
+            </span>
+          </div>
+          <p className="text-[11px] text-zinc-400 mt-1">
+            Review extracted meal structure below. Edit any cell to quickly correct typos before saving.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {onReupload && (
+            <button
+              onClick={onReupload}
+              className="text-[11px] px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 flex items-center gap-1.5 transition-colors"
+            >
+              <RefreshCw size={12} />
+              <span>Scan Photo</span>
+            </button>
+          )}
+          <button
+            onClick={handleSave}
+            className="text-[12px] px-4 py-1.5 rounded-lg bg-[#39FF14] hover:bg-[#32e012] text-zinc-950 font-bold flex items-center gap-1.5 shadow-lg shadow-[#39FF14]/20 transition-all"
+          >
+            {savedSuccess ? <Check size={14} /> : <Save size={14} />}
+            <span>{savedSuccess ? 'Saved ✓' : 'Save Menu'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Table Container */}
+      <div className="overflow-x-auto rounded-xl border border-[var(--color-border-subtle)] bg-zinc-950/60">
+        <table className="w-full text-left border-collapse min-w-[640px]">
+          <thead>
+            <tr className="bg-zinc-900/80 text-[11px] text-zinc-400 uppercase tracking-wider border-b border-[var(--color-border-subtle)]">
+              <th className="py-2.5 px-3 font-semibold text-zinc-300 w-24">Day</th>
+              <th className="py-2.5 px-3 font-semibold text-yellow-400/90">Breakfast</th>
+              <th className="py-2.5 px-3 font-semibold text-cyan-400/90">Lunch</th>
+              <th className="py-2.5 px-3 font-semibold text-orange-400/90">Snacks</th>
+              <th className="py-2.5 px-3 font-semibold text-purple-400/90">Dinner</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[var(--color-border-subtle)] text-[12px]">
+            {DAYS.map((day, dayIdx) => {
+              const abbrev = DAY_ABBREV[dayIdx];
+              return (
+                <tr key={day} className="hover:bg-zinc-900/40 transition-colors">
+                  {/* Day Badge */}
+                  <td className="py-2 px-3 font-bold text-zinc-200 align-top">
+                    <span className="inline-block px-2 py-1 rounded-md bg-zinc-800 text-[10px] text-[#39FF14] font-mono font-bold tracking-wider">
+                      {abbrev}
+                    </span>
+                    <span className="block text-[10px] text-zinc-500 font-normal mt-0.5">{day}</span>
+                  </td>
+
+                  {/* Meals */}
+                  {MEALS.map(meal => {
+                    const val = tableData[day]?.[meal] || '';
+                    const isFallback = val === 'Standard Mess Meal';
+                    return (
+                      <td key={meal} className="py-2 px-2 align-top">
+                        <textarea
+                          rows={2}
+                          value={val}
+                          onChange={e => handleCellChange(day, meal, e.target.value)}
+                          className={`w-full text-[11px] p-2 rounded-lg bg-zinc-900/70 border transition-all duration-200 resize-none focus:outline-none focus:ring-1 focus:ring-[#39FF14] ${
+                            isFallback
+                              ? 'border-yellow-500/30 text-yellow-200/80 bg-yellow-500/5'
+                              : 'border-zinc-800 text-zinc-200 focus:border-[#39FF14]'
+                          }`}
+                          placeholder="Standard Mess Meal"
+                        />
+                        {isFallback && (
+                          <span className="text-[9px] text-yellow-500/70 font-medium block mt-0.5">
+                            * Fallback
+                          </span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {rawText && (
+        <details className="w-full text-left">
+          <summary className="text-[11px] text-zinc-500 cursor-pointer hover:text-zinc-300 transition-colors flex items-center gap-1">
+            <FileText size={12} /> View raw OCR output
+          </summary>
+          <pre className="mt-2 text-[10px] text-zinc-400 bg-zinc-950 p-3 rounded-lg overflow-x-auto max-h-36 overflow-y-auto whitespace-pre-wrap break-words border border-zinc-800 font-mono">
+            {rawText}
+          </pre>
+        </details>
+      )}
+    </div>
+  );
+}
 // ========== STEP 2: MESS MENU ==========
 function StepMess({ state, update }) {
-  const [mode, setMode] = useState('manual'); // 'manual' | 'upload'
+  const [inputMode, setInputMode] = useState('scanner'); // 'scanner' | 'manual' | 'presets'
   const [uploading, setUploading] = useState(false);
   const [uploadDone, setUploadDone] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(0);
   const [ocrError, setOcrError] = useState(null);
   const [ocrRawText, setOcrRawText] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
-  const [extractMethod, setExtractMethod] = useState('gemini'); // 'gemini' | 'tesseract'
-  const [geminiKey, setGeminiKey] = useState(() => getStoredGeminiKey());
-  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [extractedMenu, setExtractedMenu] = useState(null);
   const [expandedDay, setExpandedDay] = useState('Monday');
-  const [pendingFile, setPendingFile] = useState(null);
   const fileRef = useRef(null);
-
-  const handleMenuChange = (day, meal, value) => {
-    const newMenu = { ...state.messMenu };
-    newMenu[day] = { ...newMenu[day], [meal]: value };
-    update({ messMenu: newMenu });
-  };
 
   const handleDietPref = (pref) => {
     update({ dietPref: pref });
+  };
+
+  const handleMenuChange = (day, meal, value) => {
+    const newMenu = { ...state.messMenu };
+    newMenu[day] = { ...(newMenu[day] || {}), [meal]: value };
+    update({ messMenu: newMenu });
+  };
+
+  const loadPreset = (presetType) => {
+    const menuToLoad = presetType === 'veg' ? SAMPLE_VEG_MENU : SAMPLE_NONVEG_MENU;
+    update({ messMenu: menuToLoad, dietPref: presetType === 'veg' ? 'VEG' : 'NON-VEG' });
+    setExtractedMenu(menuToLoad);
+    setOcrError(null);
+    setInputMode('scanner');
+  };
+
+  const fillDefaultMeals = () => {
+    const defaultMenu = {};
+    DAYS.forEach(day => {
+      defaultMenu[day] = {};
+      MEALS.forEach(meal => {
+        defaultMenu[day][meal] = 'Standard Mess Meal';
+      });
+    });
+    update({ messMenu: defaultMenu });
+    setExtractedMenu(defaultMenu);
+  };
+
+  const clearAllMeals = () => {
+    const emptyMenu = {};
+    DAYS.forEach(day => {
+      emptyMenu[day] = {};
+      MEALS.forEach(meal => {
+        emptyMenu[day][meal] = '';
+      });
+    });
+    update({ messMenu: emptyMenu });
+    setExtractedMenu(emptyMenu);
   };
 
   const runExtraction = async (file) => {
@@ -273,54 +470,30 @@ function StepMess({ state, update }) {
       return;
     }
 
-    // If Gemini is selected but no key, prompt for key first
-    if (extractMethod === 'gemini' && !geminiKey.trim()) {
-      setPendingFile(file);
-      setShowKeyInput(true);
-      const url = URL.createObjectURL(file);
-      setPreviewUrl(url);
-      return;
-    }
-
     setUploading(true);
     setUploadDone(false);
     setOcrError(null);
-    setOcrProgress(0);
     setOcrRawText(null);
+    setOcrProgress(5);
 
     const url = URL.createObjectURL(file);
     setPreviewUrl(url);
 
     try {
-      let result;
-      if (extractMethod === 'gemini') {
-        setOcrProgress(30); // Show some progress while API is working
-        result = await extractMenuWithGemini(file, geminiKey.trim());
-        setOcrProgress(100);
-      } else {
-        result = await extractMenuWithTesseract(file, (progress) => {
-          setOcrProgress(progress);
-        });
-      }
+      const result = await extractMenuWithTesseract(file, (prog) => {
+        setOcrProgress(prog);
+      });
+      const nutritionReport = processMenuNutrition(result.parsedMenu);
+      console.log('[Tesseract OCR] Extracted Nutrition Report:', nutritionReport);
       setOcrRawText(result.rawText);
+      setExtractedMenu(result.parsedMenu);
       update({ messMenu: result.parsedMenu });
       setUploadDone(true);
     } catch (err) {
-      console.error('[Extraction Error]', err);
-      setOcrError(err.message || 'Extraction failed');
+      console.error('[Tesseract OCR Error]', err);
+      setOcrError(err.message || 'The photograph is not clear. Please upload a clearer photo or use Manual Input.');
     } finally {
       setUploading(false);
-      setPendingFile(null);
-    }
-  };
-
-  const handleGeminiKeySubmit = () => {
-    if (geminiKey.trim()) {
-      storeGeminiKey(geminiKey.trim());
-      setShowKeyInput(false);
-      if (pendingFile) {
-        runExtraction(pendingFile);
-      }
     }
   };
 
@@ -352,7 +525,14 @@ function StepMess({ state, update }) {
     setPreviewUrl(null);
     setOcrRawText(null);
     setOcrError(null);
-    setPendingFile(null);
+    setExtractedMenu(null);
+    setOcrProgress(0);
+  };
+
+  const handleSaveEditedMenu = (savedMenu) => {
+    const nutritionReport = processMenuNutrition(savedMenu);
+    console.log('[Nutrition Engine] Updated Nutrition Report:', nutritionReport);
+    update({ messMenu: savedMenu });
   };
 
   return (
@@ -362,7 +542,7 @@ function StepMess({ state, update }) {
           <span className="text-[#22d3ee]">Mess</span> Menu
         </h2>
         <p className="text-sm text-zinc-400">
-          Enter your 7-day hostel mess diet.
+          Upload a mess schedule photo, type meals manually, or select a preset template.
         </p>
       </div>
 
@@ -397,130 +577,127 @@ function StepMess({ state, update }) {
         </div>
       </div>
 
-      {/* Toggle Mode */}
-      <div className="glass-card p-4 mb-4 animate-fadeIn delay-100">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold text-zinc-200">Input Method</p>
-            <p className="text-[11px] text-zinc-500">
-              {mode === 'manual' ? 'Type meals manually' : 'Upload mess schedule image'}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className={`text-[11px] font-medium ${mode === 'manual' ? 'text-[#39FF14]' : 'text-zinc-500'}`}>Manual</span>
-            <div
-              className={`toggle-track ${mode === 'upload' ? 'active' : ''}`}
-              onClick={() => setMode(mode === 'manual' ? 'upload' : 'manual')}
-            >
-              <div className="toggle-thumb" />
+      {/* Fitness Goal Selection (LEAN vs BULK) */}
+      <div className="glass-card p-4 mb-4 animate-fadeIn border border-[#39FF14]/30 bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-[11px] uppercase tracking-widest text-zinc-400 font-semibold flex items-center gap-1.5">
+            <Flame size={14} className="text-[#39FF14]" /> Fitness Goal *
+          </p>
+          <span className="text-[10px] bg-[#39FF14]/20 text-[#39FF14] px-2.5 py-0.5 rounded-full font-bold">
+            TAILORS HOSTEL HACKS
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <label
+            className={`flex flex-col p-3 rounded-xl cursor-pointer border transition-all duration-200 ${
+              (state.fitnessGoal || 'LEAN') === 'LEAN'
+                ? 'border-[#39FF14] bg-[rgba(57,255,20,0.08)] shadow-lg shadow-[#39FF14]/10'
+                : 'border-[var(--color-border-subtle)] hover:border-zinc-600 bg-zinc-950/40'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-bold text-zinc-100 flex items-center gap-1" style={{ fontFamily: 'var(--font-display)' }}>
+                🥗 LEAN (Cut)
+              </span>
+              <input
+                type="radio"
+                name="fitnessGoal"
+                className="radio-neon"
+                checked={(state.fitnessGoal || 'LEAN') === 'LEAN'}
+                onChange={() => update({ fitnessGoal: 'LEAN' })}
+              />
             </div>
-            <span className={`text-[11px] font-medium ${mode === 'upload' ? 'text-[#39FF14]' : 'text-zinc-500'}`}>Upload</span>
-          </div>
+            <p className="text-[10px] text-zinc-400 leading-snug">
+              Fat loss & lean muscle. High protein, low calorie density, satiety hacks.
+            </p>
+          </label>
+
+          <label
+            className={`flex flex-col p-3 rounded-xl cursor-pointer border transition-all duration-200 ${
+              state.fitnessGoal === 'BULK'
+                ? 'border-[#22d3ee] bg-[rgba(34,211,238,0.08)] shadow-lg shadow-[#22d3ee]/10'
+                : 'border-[var(--color-border-subtle)] hover:border-zinc-600 bg-zinc-950/40'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-bold text-zinc-100 flex items-center gap-1" style={{ fontFamily: 'var(--font-display)' }}>
+                🏋️ BULK (Mass)
+              </span>
+              <input
+                type="radio"
+                name="fitnessGoal"
+                className="radio-neon"
+                checked={state.fitnessGoal === 'BULK'}
+                onChange={() => update({ fitnessGoal: 'BULK' })}
+              />
+            </div>
+            <p className="text-[10px] text-zinc-400 leading-snug">
+              Muscle & mass gain. Calorie surplus, dense hostel stacks & healthy fats.
+            </p>
+          </label>
         </div>
       </div>
 
-      {/* Upload Mode */}
-      {mode === 'upload' && (
-        <div className="animate-fadeIn mb-4 space-y-3">
-          {/* Extraction Method Selector */}
-          <div className="glass-card p-4">
-            <p className="text-[11px] uppercase tracking-widest text-zinc-500 mb-3 font-semibold">
-              Extraction Engine
-            </p>
-            <div className="flex gap-2">
-              <button
-                className={`flex-1 p-3 rounded-xl border text-left transition-all duration-200 ${
-                  extractMethod === 'gemini'
-                    ? 'border-[#39FF14] bg-[rgba(57,255,20,0.05)]'
-                    : 'border-[var(--color-border-subtle)] hover:border-zinc-600'
-                }`}
-                onClick={() => setExtractMethod('gemini')}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <Sparkles size={14} className={extractMethod === 'gemini' ? 'text-[#39FF14]' : 'text-zinc-500'} />
-                  <span className="text-[12px] font-bold text-zinc-200">Gemini AI</span>
-                  <span className="text-[9px] bg-[#39FF14]/20 text-[#39FF14] px-1.5 py-0.5 rounded-full font-bold">BEST</span>
-                </div>
-                <p className="text-[10px] text-zinc-500">Google AI reads tables perfectly. Free API key required.</p>
-              </button>
-              <button
-                className={`flex-1 p-3 rounded-xl border text-left transition-all duration-200 ${
-                  extractMethod === 'tesseract'
-                    ? 'border-[#22d3ee] bg-[rgba(34,211,238,0.05)]'
-                    : 'border-[var(--color-border-subtle)] hover:border-zinc-600'
-                }`}
-                onClick={() => setExtractMethod('tesseract')}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <Camera size={14} className={extractMethod === 'tesseract' ? 'text-[#22d3ee]' : 'text-zinc-500'} />
-                  <span className="text-[12px] font-bold text-zinc-200">Basic OCR</span>
-                </div>
-                <p className="text-[10px] text-zinc-500">Offline Tesseract.js. Works for clear text images.</p>
-              </button>
-            </div>
+      {/* 3-Way Mode Navigation Bar */}
+      <div className="glass-card p-2 mb-4 animate-fadeIn">
+        <div className="grid grid-cols-3 gap-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+          <button
+            className={`py-2 px-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+              inputMode === 'scanner'
+                ? 'bg-[#39FF14] text-zinc-950 shadow-md shadow-[#39FF14]/20'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+            onClick={() => setInputMode('scanner')}
+          >
+            <Sparkles size={13} />
+            <span>OCR Scanner</span>
+          </button>
+          <button
+            className={`py-2 px-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+              inputMode === 'manual'
+                ? 'bg-[#22d3ee] text-zinc-950 shadow-md shadow-[#22d3ee]/20'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+            onClick={() => setInputMode('manual')}
+          >
+            <Edit3 size={13} />
+            <span>Manual Input</span>
+          </button>
+          <button
+            className={`py-2 px-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+              inputMode === 'presets'
+                ? 'bg-purple-500 text-zinc-950 shadow-md shadow-purple-500/20'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+            onClick={() => setInputMode('presets')}
+          >
+            <Utensils size={13} />
+            <span>Sample Presets</span>
+          </button>
+        </div>
+      </div>
 
-            {/* Gemini API Key Section */}
-            {extractMethod === 'gemini' && (
-              <div className="mt-3 animate-fadeIn">
-                {geminiKey.trim() && !showKeyInput ? (
-                  <div className="flex items-center justify-between bg-zinc-900/50 rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <Check size={12} className="text-[#39FF14]" />
-                      <span className="text-[11px] text-zinc-400">API key configured</span>
-                      <span className="text-[10px] text-zinc-600 font-mono">...{geminiKey.slice(-6)}</span>
-                    </div>
-                    <button
-                      className="text-[10px] text-[#22d3ee] hover:underline"
-                      onClick={() => setShowKeyInput(true)}
-                    >
-                      Change
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        className="input-dark text-[12px] flex-1"
-                        placeholder="Paste your Gemini API key..."
-                        value={geminiKey}
-                        onChange={e => setGeminiKey(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && handleGeminiKeySubmit()}
-                      />
-                      <button
-                        className="btn-neon text-[12px] px-4 py-2"
-                        onClick={handleGeminiKeySubmit}
-                        disabled={!geminiKey.trim()}
-                      >
-                        Save
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-zinc-600">
-                      Get a free key at{' '}
-                      <a
-                        href="https://aistudio.google.com/apikey"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[#22d3ee] hover:underline"
-                        onClick={e => e.stopPropagation()}
-                      >
-                        aistudio.google.com/apikey
-                      </a>
-                      {' '}→ Create API Key → copy & paste here
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
+      {/* MODE 1: SMART KEYLESS OCR SCANNER */}
+      {inputMode === 'scanner' && (
+        <div className="glass-card p-4 mb-4 animate-fadeIn">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Sparkles size={16} className="text-[#39FF14]" />
+              <span className="text-xs font-bold uppercase tracking-wider text-zinc-200" style={{ fontFamily: 'var(--font-display)' }}>
+                Smart OCR Photo Upload
+              </span>
+            </div>
+            <span className="text-[10px] bg-[#39FF14]/20 text-[#39FF14] px-2 py-0.5 rounded-full font-bold">
+              100% FREE & KEYLESS
+            </span>
           </div>
 
-          {/* Drop Zone */}
           <div
-            className="drop-zone p-8 flex flex-col items-center gap-4 text-center"
+            className="drop-zone p-6 flex flex-col items-center gap-3 text-center cursor-pointer"
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
-            onClick={() => !uploading && !showKeyInput && fileRef.current?.click()}
+            onClick={() => !uploading && fileRef.current?.click()}
           >
             <input
               ref={fileRef}
@@ -530,135 +707,218 @@ function StepMess({ state, update }) {
               onChange={handleFileSelect}
             />
 
-            {showKeyInput && !geminiKey.trim() ? (
-              <>
+            {uploading ? (
+              <div className="w-full space-y-3">
                 {previewUrl && (
-                  <img src={previewUrl} alt="Uploaded schedule" className="w-full max-h-32 object-contain rounded-lg mb-2 opacity-40" />
+                  <img src={previewUrl} alt="Uploaded menu schedule" className="w-full max-h-36 object-contain rounded-lg mb-2 opacity-60 mx-auto" />
                 )}
-                <AlertCircle size={24} className="text-yellow-400" />
-                <p className="text-sm text-yellow-400 font-medium">Enter your Gemini API key above first</p>
-                <p className="text-[11px] text-zinc-600">Then your image will be processed automatically</p>
-              </>
-            ) : uploading ? (
-              <>
-                {previewUrl && (
-                  <img src={previewUrl} alt="Uploaded schedule" className="w-full max-h-40 object-contain rounded-lg mb-3 opacity-60" />
-                )}
-                <div className="spinner" />
-                <p className="text-sm text-zinc-400">
-                  {extractMethod === 'gemini' ? 'Gemini AI is reading your menu...' : 'Tesseract processing image...'}
-                </p>
-                <div className="w-full max-w-[200px] mt-2">
-                  <div className="progress-track">
-                    <div className="progress-fill" style={{ width: `${ocrProgress}%` }} />
-                  </div>
-                  <p className="text-[11px] text-[#39FF14] mt-1 font-mono">{ocrProgress}%</p>
+                <div className="spinner mx-auto" />
+                <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden max-w-xs mx-auto">
+                  <div
+                    className="bg-[#39FF14] h-full transition-all duration-300"
+                    style={{ width: `${ocrProgress}%` }}
+                  />
                 </div>
-              </>
+                <p className="text-xs text-[#39FF14] font-medium animate-pulse">
+                  Enhancing contrast & reading text... {ocrProgress}%
+                </p>
+              </div>
             ) : ocrError ? (
-              <>
-                <div className="w-12 h-12 rounded-full bg-red-900/20 flex items-center justify-center">
-                  <AlertCircle size={24} className="text-red-400" />
-                </div>
-                <p className="text-sm text-red-400 font-semibold">{ocrError}</p>
-                <button
-                  className="text-[12px] text-[#39FF14] underline mt-1"
-                  onClick={resetUpload}
-                >
-                  Try again
-                </button>
-              </>
-            ) : uploadDone ? (
-              <>
-                {previewUrl && (
-                  <img src={previewUrl} alt="Uploaded schedule" className="w-full max-h-32 object-contain rounded-lg mb-3 border border-[rgba(57,255,20,0.2)]" />
-                )}
-                <div className="w-12 h-12 rounded-full bg-[rgba(57,255,20,0.15)] flex items-center justify-center animate-checkPop">
-                  <Check size={24} className="text-[#39FF14]" />
-                </div>
-                <p className="text-sm text-[#39FF14] font-semibold">
-                  Menu extracted & auto-populated! ✓
-                </p>
-                <p className="text-[11px] text-zinc-500">
-                  Extracted via {extractMethod === 'gemini' ? 'Gemini AI' : 'Tesseract OCR'} — review and edit below
-                </p>
-                {ocrRawText && (
-                  <details className="mt-3 w-full text-left">
-                    <summary className="text-[11px] text-zinc-600 cursor-pointer hover:text-zinc-400 transition-colors">
-                      View raw extracted text
-                    </summary>
-                    <pre className="mt-2 text-[10px] text-zinc-500 bg-zinc-900/50 p-3 rounded-lg overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap break-words">{ocrRawText}</pre>
-                  </details>
-                )}
-                <button
-                  className="text-[12px] text-[#22d3ee] underline mt-2"
-                  onClick={resetUpload}
-                >
-                  Upload a different image
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="w-14 h-14 rounded-2xl bg-[var(--color-surface-card)] border border-[var(--color-border-subtle)] flex items-center justify-center">
-                  {extractMethod === 'gemini' ? <Sparkles size={28} className="text-[#39FF14]" /> : <Camera size={28} className="text-zinc-500" />}
+              <div className="space-y-3 w-full" onClick={e => e.stopPropagation()}>
+                <div className="w-10 h-10 rounded-full bg-yellow-500/20 flex items-center justify-center mx-auto">
+                  <AlertCircle size={22} className="text-yellow-400" />
                 </div>
                 <div>
-                  <p className="text-sm text-zinc-300 font-medium mb-1">
-                    Drop your mess schedule photo here
+                  <p className="text-xs text-yellow-300 font-bold mb-1">
+                    Photo Unclear or Unreadable
                   </p>
-                  <p className="text-[11px] text-zinc-600">or click to browse • JPG, PNG supported</p>
-                  <p className="text-[10px] text-zinc-700 mt-1">
-                    {extractMethod === 'gemini' ? '⚡ Powered by Google Gemini AI — reads tables accurately' : 'Uses Tesseract.js offline OCR'}
+                  <p className="text-[11px] text-zinc-400 max-w-sm mx-auto leading-relaxed">
+                    {ocrError}
                   </p>
                 </div>
+                <div className="pt-2 flex flex-wrap gap-2 justify-center">
+                  <button
+                    className="text-[11px] px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[#39FF14] font-semibold flex items-center gap-1"
+                    onClick={() => setInputMode('manual')}
+                  >
+                    <Edit3 size={12} /> Type Manually Instead
+                  </button>
+                  <button
+                    className="text-[11px] px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[#22d3ee] font-semibold flex items-center gap-1"
+                    onClick={() => loadPreset('veg')}
+                  >
+                    <Salad size={12} /> Load Veg Menu
+                  </button>
+                  <button
+                    className="text-[11px] px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-red-400 font-semibold flex items-center gap-1"
+                    onClick={() => loadPreset('nonveg')}
+                  >
+                    <Beef size={12} /> Load Non-Veg Menu
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {previewUrl && uploadDone ? (
+                  <div className="flex items-center gap-3 w-full bg-zinc-900/40 p-2 rounded-lg border border-zinc-800">
+                    <img src={previewUrl} alt="Uploaded menu photo" className="w-16 h-16 object-cover rounded-md" />
+                    <div className="text-left flex-1">
+                      <p className="text-xs font-bold text-[#39FF14] flex items-center gap-1">
+                        <Check size={14} /> Table Structure Extracted!
+                      </p>
+                      <p className="text-[10px] text-zinc-500">Review & edit items in the table below.</p>
+                    </div>
+                    <button
+                      onClick={resetUpload}
+                      className="p-2 text-zinc-400 hover:text-zinc-200 transition-colors"
+                      title="Upload another photo"
+                    >
+                      <RefreshCw size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="w-12 h-12 rounded-2xl bg-[var(--color-surface-card)] border border-[var(--color-border-subtle)] flex items-center justify-center">
+                      <Sparkles size={24} className="text-[#39FF14]" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-zinc-300 font-medium">
+                        Drop mess menu photo here or click to browse
+                      </p>
+                      <p className="text-[10px] text-zinc-500 mt-0.5">
+                        ⚡ Keyless browser OCR reads MON-SUN table structure accurately
+                      </p>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>
         </div>
       )}
 
-      {/* Manual Mode / Editable fields */}
-      <div className="space-y-2">
-        {DAYS.map((day) => (
-          <div key={day} className="glass-card overflow-hidden animate-fadeIn">
-            <button
-              className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-[var(--color-surface-hover)] transition-colors"
-              onClick={() => setExpandedDay(expandedDay === day ? null : day)}
-            >
-              <span className="text-sm font-bold uppercase tracking-wider"
-                    style={{ fontFamily: 'var(--font-display)', color: expandedDay === day ? '#22d3ee' : '#a1a1aa' }}>
-                {day}
-              </span>
-              <ChevronRight
-                size={16}
-                className={`text-zinc-500 transition-transform duration-200 ${expandedDay === day ? 'rotate-90' : ''}`}
-              />
-            </button>
-            {expandedDay === day && (
-              <div className="px-4 pb-4 space-y-3 animate-fadeIn">
-                {MEALS.map(meal => (
-                  <div key={meal}>
-                    <label className="text-[11px] text-zinc-500 uppercase tracking-wider font-medium mb-1 flex items-center gap-1.5">
-                      {meal === 'Breakfast' && <Coffee size={11} />}
-                      {meal === 'Lunch' && <Utensils size={11} />}
-                      {meal === 'Evening Snacks' && <Cookie size={11} />}
-                      {meal === 'Dinner' && <Moon size={11} />}
-                      {meal}
-                    </label>
-                    <input
-                      type="text"
-                      className="input-dark text-[13px]"
-                      placeholder={`Enter ${meal.toLowerCase()} items...`}
-                      value={state.messMenu[day][meal]}
-                      onChange={e => handleMenuChange(day, meal, e.target.value)}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
+      {/* MODE 2: MANUAL INPUT EDITOR */}
+      {inputMode === 'manual' && (
+        <div className="glass-card p-4 mb-4 animate-fadeIn space-y-4 border border-[#22d3ee]/30">
+          <div className="flex items-center justify-between pb-3 border-b border-[var(--color-border-subtle)]">
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-200" style={{ fontFamily: 'var(--font-display)' }}>
+                Manual Mess Menu Entry
+              </h3>
+              <p className="text-[11px] text-zinc-400 mt-0.5">
+                Type your 7-day meals manually. Any blank meal will be saved as "Standard Mess Meal".
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={fillDefaultMeals}
+                className="text-[10px] px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-[#22d3ee] font-medium"
+              >
+                Fill Defaults
+              </button>
+              <button
+                onClick={clearAllMeals}
+                className="text-[10px] px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-400 font-medium"
+              >
+                Clear All
+              </button>
+            </div>
           </div>
-        ))}
-      </div>
+
+          {/* Day-by-Day Manual Inputs */}
+          <div className="space-y-3">
+            {DAYS.map((day) => (
+              <div key={day} className="glass-card overflow-hidden bg-zinc-950/60 border border-zinc-800">
+                <button
+                  className="w-full px-4 py-2.5 flex items-center justify-between text-left hover:bg-zinc-900/50 transition-colors"
+                  onClick={() => setExpandedDay(expandedDay === day ? null : day)}
+                >
+                  <span className="text-xs font-bold uppercase tracking-wider"
+                        style={{ fontFamily: 'var(--font-display)', color: expandedDay === day ? '#22d3ee' : '#e4e4e7' }}>
+                    {day}
+                  </span>
+                  <ChevronRight
+                    size={14}
+                    className={`text-zinc-500 transition-transform duration-200 ${expandedDay === day ? 'rotate-90' : ''}`}
+                  />
+                </button>
+                {expandedDay === day && (
+                  <div className="px-4 pb-4 space-y-3 pt-2 animate-fadeIn border-t border-zinc-900">
+                    {MEALS.map(meal => (
+                      <div key={meal}>
+                        <label className="text-[10px] text-zinc-400 uppercase tracking-wider font-semibold mb-1 flex items-center gap-1.5">
+                          {meal === 'Breakfast' && <Coffee size={11} className="text-yellow-400" />}
+                          {meal === 'Lunch' && <Utensils size={11} className="text-cyan-400" />}
+                          {meal === 'Evening Snacks' && <Cookie size={11} className="text-orange-400" />}
+                          {meal === 'Dinner' && <Moon size={11} className="text-purple-400" />}
+                          {meal}
+                        </label>
+                        <input
+                          type="text"
+                          className="input-dark text-[12px] py-1.5"
+                          placeholder="Standard Mess Meal"
+                          value={state.messMenu[day]?.[meal] || ''}
+                          onChange={e => handleMenuChange(day, meal, e.target.value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* MODE 3: PRESET TEMPLATES */}
+      {inputMode === 'presets' && (
+        <div className="glass-card p-4 mb-4 animate-fadeIn space-y-3 border border-purple-500/30">
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-purple-300" style={{ fontFamily: 'var(--font-display)' }}>
+              1-Click Sample Mess Menus
+            </h3>
+            <p className="text-[11px] text-zinc-400 mt-0.5">
+              Select a pre-configured Indian hostel mess menu template to auto-fill your schedule instantly.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <button
+              onClick={() => loadPreset('veg')}
+              className="p-4 rounded-xl border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 text-left transition-all group"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <Salad size={18} className="text-green-400" />
+                <span className="text-xs font-bold text-green-300">Veg Mess Menu</span>
+              </div>
+              <p className="text-[10px] text-zinc-400">
+                Poha, Idli, Dal Tadka, Paneer Butter Masala, Rajma, Samosa & Chole.
+              </p>
+            </button>
+
+            <button
+              onClick={() => loadPreset('nonveg')}
+              className="p-4 rounded-xl border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 text-left transition-all group"
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <Beef size={18} className="text-red-400" />
+                <span className="text-xs font-bold text-red-300">Non-Veg Mess Menu</span>
+              </div>
+              <p className="text-[10px] text-zinc-400">
+                Eggs, Chicken Curry, Fish Curry, Chicken Biryani & Mutton.
+              </p>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Always Display Editable Review Table Below */}
+      <EditableReviewTable
+        initialMenu={extractedMenu || state.messMenu}
+        onSave={handleSaveEditedMenu}
+        onReupload={resetUpload}
+        rawText={ocrRawText}
+      />
     </div>
   );
 }
@@ -735,11 +995,13 @@ function StepInventory({ state, update }) {
 // ========== STEP 4: REVIEW ==========
 function StepReview({ state }) {
   const activeMuscles = DAYS.reduce((count, day) => {
-    return count + state.split[day].filter(m => m !== 'NIL').length;
+    const daySplit = state.split?.[day] || [];
+    return count + daySplit.filter(m => m !== 'NIL').length;
   }, 0);
 
   const filledMeals = DAYS.reduce((count, day) => {
-    return count + MEALS.filter(m => state.messMenu[day][m].trim()).length;
+    const dayMenu = state.messMenu?.[day] || {};
+    return count + MEALS.filter(m => dayMenu[m] && String(dayMenu[m]).trim()).length;
   }, 0);
 
   return (
@@ -873,6 +1135,7 @@ function Dashboard({ state, update }) {
   const activeView = state.activeView;
   const [installPrompt, setInstallPrompt] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
 
   // Listen for PWA install prompt
   useEffect(() => {
@@ -883,7 +1146,7 @@ function Dashboard({ state, update }) {
     window.addEventListener('beforeinstallprompt', handler);
 
     // Check if already installed
-    if (window.matchMedia('(display-mode: standalone)').matches) {
+    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
       setIsInstalled(true);
     }
     window.addEventListener('appinstalled', () => setIsInstalled(true));
@@ -891,14 +1154,17 @@ function Dashboard({ state, update }) {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
-  const handleInstall = async () => {
-    if (!installPrompt) return;
-    installPrompt.prompt();
-    const { outcome } = await installPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setIsInstalled(true);
+  const handleInstallClick = async () => {
+    if (installPrompt) {
+      installPrompt.prompt();
+      const { outcome } = await installPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setIsInstalled(true);
+      }
+      setInstallPrompt(null);
+    } else {
+      setShowInstallGuide(true);
     }
-    setInstallPrompt(null);
   };
 
   const handleReset = () => {
@@ -909,11 +1175,11 @@ function Dashboard({ state, update }) {
   };
 
   return (
-    <div className="app-container bg-[var(--color-surface)] min-h-screen flex flex-col">
+    <div className="app-container bg-[var(--color-surface)] min-h-screen flex flex-col relative">
       {/* Top Bar */}
       <div className="px-5 pt-5 pb-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#39FF14] to-[#22d3ee] flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#39FF14] to-[#22d3ee] flex items-center justify-center shadow-lg shadow-[#39FF14]/10">
             <Dumbbell size={18} className="text-zinc-950" />
           </div>
           <div>
@@ -924,17 +1190,18 @@ function Dashboard({ state, update }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {installPrompt && !isInstalled && (
+          {!isInstalled ? (
             <button
-              className="h-8 px-3 rounded-lg bg-gradient-to-r from-[#39FF14]/20 to-[#22d3ee]/20 border border-[#39FF14]/40 hover:border-[#39FF14] flex items-center gap-1.5 transition-all duration-300 group"
-              onClick={handleInstall}
+              className="h-8 px-3 rounded-lg bg-gradient-to-r from-[#39FF14]/20 to-[#22d3ee]/20 border border-[#39FF14]/40 hover:border-[#39FF14] flex items-center gap-1.5 transition-all duration-300 group shadow-md shadow-[#39FF14]/10"
+              onClick={handleInstallClick}
               title="Install GymForge App"
             >
               <Download size={13} className="text-[#39FF14] group-hover:animate-bounce" />
-              <span className="text-[10px] font-bold text-[#39FF14] uppercase tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>Install</span>
+              <span className="text-[10px] font-bold text-[#39FF14] uppercase tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>
+                Install App
+              </span>
             </button>
-          )}
-          {isInstalled && (
+          ) : (
             <span className="h-8 px-3 rounded-lg bg-[#39FF14]/10 border border-[#39FF14]/20 flex items-center gap-1.5">
               <Check size={12} className="text-[#39FF14]" />
               <span className="text-[10px] font-medium text-[#39FF14]/70">Installed</span>
@@ -949,6 +1216,14 @@ function Dashboard({ state, update }) {
           </button>
         </div>
       </div>
+
+      {/* PWA Installation Guide Modal */}
+      {showInstallGuide && (
+        <InstallGuideModal
+          onClose={() => setShowInstallGuide(false)}
+          onTriggerInstall={installPrompt ? handleInstallClick : null}
+        />
+      )}
 
       {/* Day Selector */}
       <div className="px-5 pb-3">
@@ -1006,12 +1281,12 @@ function Dashboard({ state, update }) {
         )}
         {activeView === 'meals' && (
           <div className="animate-fadeIn" key={`meals-${activeDay}`}>
-            <MealsView state={state} day={activeDay} />
+            <MealsView state={state} update={update} day={activeDay} />
           </div>
         )}
         {activeView === 'hacks' && (
           <div className="animate-fadeIn" key="hacks">
-            <HacksView state={state} />
+            <HacksView state={state} update={update} />
           </div>
         )}
         {!activeView && (
@@ -1199,8 +1474,10 @@ function WorkoutView({ state, update, day }) {
 
 
 // ========== VIEW 2: MESS MEALS ==========
-function MealsView({ state, day }) {
+function MealsView({ state, update, day }) {
   const menu = state.messMenu[day] || {};
+  const [showEditor, setShowEditor] = useState(false);
+  const [mealFilter, setMealFilter] = useState('all'); // 'all' | 'veg' | 'protein' | 'nonveg'
 
   const mealMeta = [
     { key: 'Breakfast', icon: Coffee, time: '7:30 – 9:00 AM', color: '#facc15' },
@@ -1209,45 +1486,191 @@ function MealsView({ state, day }) {
     { key: 'Dinner', icon: Moon, time: '7:30 – 9:30 PM', color: '#a78bfa' },
   ];
 
+  const dayMacros = estimateDayMacros(menu);
+
+  let processedMeals = mealMeta.map(m => {
+    const dishText = menu[m.key] || 'Standard Mess Meal';
+    const macros = estimateMealMacros(dishText);
+    return { ...m, dishText, macros };
+  });
+
+  if (mealFilter === 'veg') {
+    processedMeals = processedMeals.filter(m => m.macros.isVeg);
+  } else if (mealFilter === 'protein') {
+    processedMeals = [...processedMeals].sort((a, b) => b.macros.protein - a.macros.protein);
+  }
+
+  const isNonVegDay = dayMacros.isNonVegDay;
+
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <Utensils size={18} className="text-[#22d3ee]" />
           <h3 className="text-sm font-bold uppercase tracking-wider" style={{ fontFamily: 'var(--font-display)', color: '#22d3ee' }}>
-            {day}'s Meals
+            {day}'s Mess Menu
           </h3>
         </div>
-        <span className={`text-[11px] font-bold px-3 py-1 rounded-full ${
-          state.dietPref === 'VEG'
-            ? 'bg-green-900/40 text-green-400 border border-green-800/50'
-            : 'bg-red-900/40 text-red-400 border border-red-800/50'
-        }`}>
-          {state.dietPref === 'VEG' ? '🟢' : '🔴'} {state.dietPref}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className={`text-[11px] font-bold px-3 py-1 rounded-full ${
+            state.dietPref === 'VEG'
+              ? 'bg-green-900/40 text-green-400 border border-green-800/50'
+              : 'bg-red-900/40 text-red-400 border border-red-800/50'
+          }`}>
+            {state.dietPref === 'VEG' ? '🟢' : '🔴'} {state.dietPref}
+          </span>
+          {update && (
+            <button
+              onClick={() => setShowEditor(!showEditor)}
+              className="text-[11px] font-semibold px-3 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[#39FF14] flex items-center gap-1.5 transition-colors border border-zinc-700"
+            >
+              {showEditor ? <Check size={12} /> : <Edit3 size={12} />}
+              <span>{showEditor ? 'Done Editing' : 'Upload / Edit'}</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="space-y-3">
-        {mealMeta.map((meal, idx) => (
-          <div
-            key={meal.key}
-            className="meal-card animate-fadeIn"
-            style={{ animationDelay: `${idx * 0.1}s`, borderLeftWidth: '3px', borderLeftColor: meal.color }}
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <meal.icon size={16} style={{ color: meal.color }} />
-              <span className="text-[12px] font-bold uppercase tracking-wider" style={{ color: meal.color, fontFamily: 'var(--font-display)' }}>
-                {meal.key}
-              </span>
-              <span className="text-[10px] text-zinc-600 ml-auto flex items-center gap-1">
-                <Clock size={10} /> {meal.time}
-              </span>
-            </div>
-            <p className="text-[13px] text-zinc-300 leading-relaxed">
-              {menu[meal.key] || <span className="text-zinc-600 italic">Not specified</span>}
-            </p>
+      {showEditor && update && (
+        <div className="mb-4 animate-fadeIn">
+          <StepMess state={state} update={update} />
+        </div>
+      )}
+
+      {/* DAILY NUTRITION SUMMARY BAR */}
+      <div className={`glass-card p-4 rounded-2xl animate-fadeIn transition-all border ${
+        mealFilter === 'nonveg' && isNonVegDay
+          ? 'border-red-500/60 bg-gradient-to-r from-red-950/40 via-zinc-900 to-zinc-950 shadow-lg shadow-red-500/10'
+          : 'border-[#39FF14]/30 bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950'
+      }`}>
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <Zap size={16} className="text-[#39FF14]" />
+            <span className="text-xs font-bold uppercase tracking-widest text-[#39FF14]" style={{ fontFamily: 'var(--font-display)' }}>
+              {day}'s Daily Nutrition Summary
+            </span>
           </div>
-        ))}
+          <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 ${
+            isNonVegDay
+              ? 'bg-red-500/20 text-red-300 border border-red-500/40'
+              : 'bg-green-500/20 text-green-300 border border-green-500/40'
+          }`}>
+            {isNonVegDay ? '🔴 NON-VEG DAY' : '🟢 VEG DAY'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-4 gap-2 text-center">
+          <div className="bg-zinc-900/90 p-2.5 rounded-xl border border-yellow-500/20">
+            <p className="text-[9px] text-yellow-400 uppercase tracking-wider font-semibold">Calories</p>
+            <p className="text-sm font-black text-yellow-300 mt-0.5">{dayMacros.calories} <span className="text-[9px] font-normal text-yellow-400/80">kcal</span></p>
+          </div>
+          <div className="bg-zinc-900/90 p-2.5 rounded-xl border border-[#39FF14]/40 bg-[#39FF14]/5">
+            <p className="text-[9px] text-[#39FF14] uppercase tracking-wider font-semibold">Protein</p>
+            <p className="text-sm font-black text-[#39FF14] mt-0.5">{dayMacros.protein} <span className="text-[9px] font-normal text-[#39FF14]/80">g</span></p>
+          </div>
+          <div className="bg-zinc-900/90 p-2.5 rounded-xl border border-cyan-500/20">
+            <p className="text-[9px] text-cyan-400 uppercase tracking-wider font-semibold">Carbs</p>
+            <p className="text-sm font-black text-cyan-300 mt-0.5">{dayMacros.carbs} <span className="text-[9px] font-normal text-cyan-400/80">g</span></p>
+          </div>
+          <div className="bg-zinc-900/90 p-2.5 rounded-xl border border-orange-500/20">
+            <p className="text-[9px] text-orange-400 uppercase tracking-wider font-semibold">Fats</p>
+            <p className="text-sm font-black text-orange-300 mt-0.5">{dayMacros.fats} <span className="text-[9px] font-normal text-orange-400/80">g</span></p>
+          </div>
+        </div>
+      </div>
+
+      {/* USER PREFERENCE FILTER TOGGLES */}
+      <div className="space-y-1.5">
+        <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-semibold px-1">
+          Meal Preferences Filter
+        </p>
+        <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+          {[
+            { id: 'all', label: 'All Meals' },
+            { id: 'veg', label: '🌱 Show Only Veg' },
+            { id: 'protein', label: '💪 Show High Protein First' },
+            { id: 'nonveg', label: '🔴 Highlight Non-Veg Days' },
+          ].map(f => (
+            <button
+              key={f.id}
+              onClick={() => setMealFilter(f.id)}
+              className={`px-3 py-1.5 text-[10px] font-bold rounded-lg transition-all whitespace-nowrap ${
+                mealFilter === f.id
+                  ? 'bg-[#39FF14] text-zinc-950 shadow-md shadow-[#39FF14]/20'
+                  : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* MEAL CARDS WITH MACRO BADGES */}
+      <div className="space-y-3">
+        {processedMeals.length === 0 ? (
+          <div className="text-center py-8 glass-card">
+            <Salad size={32} className="mx-auto text-zinc-600 mb-2" />
+            <p className="text-xs text-zinc-400 font-medium">No meals match your active filter.</p>
+            <button
+              onClick={() => setMealFilter('all')}
+              className="mt-2 text-[11px] text-[#39FF14] hover:underline font-bold"
+            >
+              Reset to All Meals
+            </button>
+          </div>
+        ) : (
+          processedMeals.map((meal, idx) => {
+            const isNonVegMeal = !meal.macros.isVeg;
+            const isHighlightNonVeg = mealFilter === 'nonveg' && isNonVegMeal;
+            return (
+              <div
+                key={meal.key}
+                className={`meal-card animate-fadeIn transition-all ${
+                  isHighlightNonVeg ? '!border-red-500/90 bg-red-950/20 shadow-lg shadow-red-500/20 ring-1 ring-red-500/40' : ''
+                }`}
+                style={{ animationDelay: `${idx * 0.08}s`, borderLeftWidth: '3px', borderLeftColor: meal.color }}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <meal.icon size={16} style={{ color: meal.color }} />
+                  <span className="text-[12px] font-bold uppercase tracking-wider" style={{ color: meal.color, fontFamily: 'var(--font-display)' }}>
+                    {meal.key}
+                  </span>
+                  <span className="text-[10px] text-zinc-500 ml-auto flex items-center gap-1">
+                    <Clock size={10} /> {meal.time}
+                  </span>
+                </div>
+
+                <p className="text-[13px] text-zinc-200 leading-relaxed font-medium">
+                  {meal.dishText}
+                </p>
+
+                {/* COLOR-CODED MACRO BADGES */}
+                <div className="flex flex-wrap gap-1.5 mt-3 pt-2.5 border-t border-zinc-800/60 items-center">
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-yellow-500/10 text-yellow-300 border border-yellow-500/20 flex items-center gap-1">
+                    <Flame size={10} className="text-yellow-400" /> {meal.macros.calories} kcal
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[#39FF14]/10 text-[#39FF14] border border-[#39FF14]/30 flex items-center gap-1">
+                    <Zap size={10} className="text-[#39FF14]" /> {meal.macros.protein}g Protein
+                  </span>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+                    🌾 {meal.macros.carbs}g Carbs
+                  </span>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-orange-500/10 text-orange-300 border border-orange-500/20">
+                    🥑 {meal.macros.fats}g Fats
+                  </span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ml-auto ${
+                    meal.macros.isVeg
+                      ? 'bg-green-900/30 text-green-400 border border-green-800/40'
+                      : 'bg-red-900/30 text-red-400 border border-red-800/40'
+                  }`}>
+                    {meal.macros.isVeg ? '🟢 VEG' : '🔴 NON-VEG'}
+                  </span>
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );
@@ -1255,20 +1678,122 @@ function MealsView({ state, day }) {
 
 
 // ========== VIEW 3: HOSTEL HACKS ==========
-function HacksView({ state }) {
+function HacksView({ state, update }) {
+  const fitnessGoal = state.fitnessGoal || 'LEAN';
+  const isLean = fitnessGoal === 'LEAN';
+
   const customItemsList = state.customItems
     ? state.customItems.split(',').map(i => i.trim()).filter(Boolean)
     : [];
-  const { preWorkout, postWorkout } = generateRecipes(state.roomItems, customItemsList);
+
+  const goalInfo = getGoalTargets(fitnessGoal);
+  const targetProtein = state.targetProtein || goalInfo.targetProtein;
+  const activeDayMenu = state.messMenu[state.activeDay] || {};
+  const messMacros = estimateDayMacros(activeDayMenu);
+  const messProtein = messMacros.protein;
+  const proteinGap = calculateProteinGap(messProtein, targetProtein, fitnessGoal);
+  const percentCovered = Math.min(100, Math.round((messProtein / targetProtein) * 100));
+
+  const { preWorkout, postWorkout, hostelHacks } = generateRecipes(state.roomItems, customItemsList, proteinGap, fitnessGoal);
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-4">
-        <ChefHat size={18} className="text-[#39FF14]" />
-        <h3 className="text-sm font-bold uppercase tracking-wider" style={{ fontFamily: 'var(--font-display)', color: '#39FF14' }}>
-          Hostel Hacks
-        </h3>
+      {/* Header & Fitness Goal Pill Toggle */}
+      <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
+        <div className="flex items-center gap-2">
+          <ChefHat size={18} className="text-[#39FF14]" />
+          <h3 className="text-sm font-bold uppercase tracking-wider" style={{ fontFamily: 'var(--font-display)', color: '#39FF14' }}>
+            Hostel Hacks & Recipes
+          </h3>
+        </div>
+
+        {/* Goal Selector Pill */}
+        <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+          <button
+            onClick={() => update({ fitnessGoal: 'LEAN' })}
+            className={`px-3 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+              isLean ? 'bg-[#39FF14] text-zinc-950 shadow-md shadow-[#39FF14]/20' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Salad size={12} /> LEAN
+          </button>
+          <button
+            onClick={() => update({ fitnessGoal: 'BULK' })}
+            className={`px-3 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
+              !isLean ? 'bg-[#22d3ee] text-zinc-950 shadow-md shadow-[#22d3ee]/20' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Flame size={12} /> BULK
+          </button>
+        </div>
       </div>
+
+      {/* GOAL STRATEGY & DEFICIT TRACKER */}
+      <div className="glass-card p-4 mb-5 border border-[#39FF14]/40 bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 animate-fadeIn">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Zap size={16} className="text-[#39FF14]" />
+            <span className="text-xs font-bold text-zinc-100 uppercase tracking-wider" style={{ fontFamily: 'var(--font-display)' }}>
+              {goalInfo.label}
+            </span>
+          </div>
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+            proteinGap > 0 ? 'bg-[#39FF14]/20 text-[#39FF14]' : 'bg-green-500/20 text-green-300'
+          }`}>
+            {proteinGap > 0 ? `${proteinGap}g DEFICIT` : 'GOAL MET ✓'}
+          </span>
+        </div>
+
+        <div className="space-y-2 mb-3">
+          <div className="flex justify-between text-[11px]">
+            <span className="text-zinc-400">Mess Provided: <strong className="text-[#39FF14]">{messProtein}g</strong> / {targetProtein}g Target</span>
+            <span className="text-[#39FF14] font-bold">{percentCovered}%</span>
+          </div>
+          <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
+            <div
+              className="bg-gradient-to-r from-[#39FF14] to-[#22d3ee] h-full transition-all duration-500"
+              style={{ width: `${percentCovered}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Goal Specific Tips */}
+        <div className="pt-2 border-t border-zinc-800/80">
+          <p className="text-[10px] uppercase tracking-widest text-[#39FF14] font-bold mb-1.5 flex items-center gap-1">
+            <Sparkles size={11} /> {goalInfo.adviceHeader}
+          </p>
+          <ul className="grid grid-cols-1 md:grid-cols-2 gap-1.5 text-[11px] text-zinc-300">
+            {goalInfo.hacks.map((hackTip, i) => (
+              <li key={i} className="flex items-start gap-1.5">
+                <Check size={12} className="text-[#39FF14] shrink-0 mt-0.5" />
+                <span>{hackTip}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      {/* INTERNET STUDENT HOSTEL HACKS */}
+      {hostelHacks.length > 0 && (
+        <div className="mb-6">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2">
+              <Sparkles size={15} className={isLean ? 'text-[#39FF14]' : 'text-[#22d3ee]'} />
+              <span className="text-[12px] font-bold uppercase tracking-widest text-zinc-200" style={{ fontFamily: 'var(--font-display)' }}>
+                Internet Hostel Hacks ({isLean ? '🔥 Lean Cutting' : '🏋️ Mass Bulking'})
+              </span>
+            </div>
+            <span className="text-[9px] bg-[#39FF14]/20 text-[#39FF14] px-2 py-0.5 rounded-full font-bold">
+              ZERO COOK
+            </span>
+          </div>
+          <div className="space-y-3">
+            {hostelHacks.map((hack, idx) => (
+              <RecipeCard key={`hack-${idx}`} recipe={hack} idx={idx} accentColor={isLean ? '#39FF14' : '#22d3ee'} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Pre-workout */}
       <div className="mb-6">
@@ -1290,7 +1815,7 @@ function HacksView({ state }) {
         <div className="flex items-center gap-2 mb-3">
           <Heart size={14} className="text-[#22d3ee]" />
           <span className="text-[12px] font-bold uppercase tracking-widest text-[#22d3ee]" style={{ fontFamily: 'var(--font-display)' }}>
-            Post-Workout Recovery
+            Post-Workout Recovery & Deficit Fillers
           </span>
         </div>
         <div className="space-y-3">
@@ -1314,7 +1839,7 @@ function RecipeCard({ recipe, idx, accentColor }) {
       style={{ animationDelay: `${idx * 0.08}s` }}
       onClick={() => setExpanded(!expanded)}
     >
-      <div className="flex items-start justify-between mb-2">
+      <div className="flex items-start justify-between mb-1.5">
         <h4 className="text-[14px] font-bold text-zinc-200 leading-snug pr-2">
           {recipe.name}
         </h4>
@@ -1326,13 +1851,26 @@ function RecipeCard({ recipe, idx, accentColor }) {
         </span>
       </div>
 
-      <div className="flex items-center gap-3 text-[11px] text-zinc-500 mb-2">
+      {recipe.gapFillBadge && (
+        <div className="mb-2">
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-[#39FF14]/15 text-[#39FF14] border border-[#39FF14]/30 inline-flex items-center gap-1">
+            <Sparkles size={11} /> {recipe.gapFillBadge}
+          </span>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 text-[11px] text-zinc-500 mb-1">
         <span className="flex items-center gap-1">
           <Timer size={11} /> {recipe.timing}
         </span>
         <span className="flex items-center gap-1">
           <Flame size={11} /> {recipe.calories}
         </span>
+        {recipe.proteinGrams > 0 && (
+          <span className="flex items-center gap-1 text-[#39FF14] font-semibold">
+            <Zap size={11} /> +{recipe.proteinGrams}g Protein
+          </span>
+        )}
       </div>
 
       {expanded && (
@@ -1362,3 +1900,160 @@ function RecipeCard({ recipe, idx, accentColor }) {
     </div>
   );
 }
+
+
+// ========== PWA INSTALLATION GUIDE MODAL ==========
+function InstallGuideModal({ onClose, onTriggerInstall }) {
+  const [activeTab, setActiveTab] = useState('android');
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto relative">
+        {/* Header */}
+        <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#39FF14] to-[#22d3ee] flex items-center justify-center">
+              <Download size={16} className="text-zinc-950" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-zinc-100" style={{ fontFamily: 'var(--font-display)' }}>
+                Install GymForge
+              </h3>
+              <p className="text-[10px] text-zinc-400">Install as a Web App on your phone or desktop</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg bg-zinc-800/60 hover:bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-zinc-100 transition-colors"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* 1-Click Prompt Button if ready */}
+        {onTriggerInstall && (
+          <div className="p-3 bg-gradient-to-r from-[#39FF14]/15 to-[#22d3ee]/15 border border-[#39FF14]/40 rounded-xl">
+            <p className="text-xs text-zinc-200 mb-2 font-medium">Your browser is ready for 1-click installation:</p>
+            <button
+              onClick={() => { onTriggerInstall(); onClose(); }}
+              className="btn-neon w-full py-2.5 text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-[#39FF14]/20"
+            >
+              <Download size={15} /> Install Application Now
+            </button>
+          </div>
+        )}
+
+        {/* Platform Selector */}
+        <div className="grid grid-cols-3 gap-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+          <button
+            className={`py-1.5 px-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 transition-all ${
+              activeTab === 'android' ? 'bg-[#39FF14] text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+            onClick={() => setActiveTab('android')}
+          >
+            <Smartphone size={12} /> Android
+          </button>
+          <button
+            className={`py-1.5 px-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 transition-all ${
+              activeTab === 'ios' ? 'bg-[#22d3ee] text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+            onClick={() => setActiveTab('ios')}
+          >
+            <Smartphone size={12} /> iPhone/iOS
+          </button>
+          <button
+            className={`py-1.5 px-2 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 transition-all ${
+              activeTab === 'desktop' ? 'bg-purple-400 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+            onClick={() => setActiveTab('desktop')}
+          >
+            <Laptop size={12} /> PC / Mac
+          </button>
+        </div>
+
+        {/* Steps Content */}
+        <div className="bg-zinc-950/60 p-4 rounded-xl border border-zinc-800/80 space-y-3">
+          {activeTab === 'android' && (
+            <ol className="space-y-2.5 text-xs text-zinc-300">
+              <li className="flex items-start gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-[#39FF14]/20 text-[#39FF14] font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
+                <span>Open <strong>Chrome</strong> or <strong>Edge</strong> on your Android phone.</span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-[#39FF14]/20 text-[#39FF14] font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
+                <span>Tap the <strong>3 dots menu (⋮)</strong> in the top right corner.</span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-[#39FF14]/20 text-[#39FF14] font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
+                <span>Tap <strong>"Add to Home screen"</strong> or <strong>"Install app"</strong>.</span>
+              </li>
+            </ol>
+          )}
+
+          {activeTab === 'ios' && (
+            <ol className="space-y-2.5 text-xs text-zinc-300">
+              <li className="flex items-start gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-[#22d3ee]/20 text-[#22d3ee] font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
+                <span>Open this page in <strong>Safari</strong> on your iPhone or iPad.</span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-[#22d3ee]/20 text-[#22d3ee] font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
+                <span className="flex items-center gap-1 flex-wrap">
+                  Tap the <strong>Share</strong> button <Share2 size={13} className="text-[#22d3ee] inline" /> at the bottom toolbar.
+                </span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-[#22d3ee]/20 text-[#22d3ee] font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
+                <span>Scroll down and select <strong>"Add to Home Screen" (+)</strong>.</span>
+              </li>
+            </ol>
+          )}
+
+          {activeTab === 'desktop' && (
+            <ol className="space-y-2.5 text-xs text-zinc-300">
+              <li className="flex items-start gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-purple-400/20 text-purple-300 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
+                <span>Open <strong>Chrome</strong> or <strong>Edge</strong> on your desktop.</span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-purple-400/20 text-purple-300 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
+                <span>Look at the right side of your browser <strong>Address Bar</strong>.</span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-purple-400/20 text-purple-300 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
+                <span>Click the <strong>Install GymForge (⊕)</strong> icon or menu item.</span>
+              </li>
+            </ol>
+          )}
+        </div>
+
+        {/* Benefits list */}
+        <div className="pt-1">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-2">Why install?</p>
+          <div className="grid grid-cols-2 gap-2 text-[11px] text-zinc-400">
+            <div className="flex items-center gap-1.5">
+              <Check size={12} className="text-[#39FF14]" /> Offline Access
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Check size={12} className="text-[#39FF14]" /> Fullscreen App View
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Check size={12} className="text-[#39FF14]" /> Fast Home Icon Launch
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Check size={12} className="text-[#39FF14]" /> Zero Storage Impact
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={onClose}
+          className="btn-ghost w-full py-2 text-xs font-semibold text-zinc-400 hover:text-zinc-100"
+        >
+          Close Guide
+        </button>
+      </div>
+    </div>
+  );
+}
+
