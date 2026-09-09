@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Dumbbell, Download, Check, Cloud, CloudUpload, User, LogOut, Lock, RotateCcw } from 'lucide-react';
+import { Dumbbell, Download, Check, CloudUpload, User, LogOut, Lock, RotateCcw } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useApp } from '../../context/AppContext.jsx';
 

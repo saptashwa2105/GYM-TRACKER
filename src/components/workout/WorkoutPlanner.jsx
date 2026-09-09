@@ -1,8 +1,6 @@
 import React from 'react';
-import { motion } from 'framer-motion';
 import { DAYS, MUSCLE_GROUPS, DEFAULT_SPLIT, EXERCISE_DB } from '../../data.js';
 import { useApp } from '../../context/AppContext.jsx';
-import { RotateCcw, Check, Sparkles, Dumbbell } from 'lucide-react';
 
 export default function WorkoutPlanner() {
   const { state, update, initWorkouts, showToast } = useApp();

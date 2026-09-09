@@ -121,27 +121,29 @@ export function AppProvider({ children }) {
       fetchUserData(user.id).then(cloudData => {
         if (!active || !cloudData) return;
         if (cloudData.profile || cloudData.splits.length > 0) {
-          // Merge cloud data into state
-          const newSplit = { ...state.split };
-          cloudData.splits.forEach(s => {
-            if (s.day_of_week && Array.isArray(s.target_muscles)) {
-              newSplit[s.day_of_week] = s.target_muscles;
-            }
-          });
+          setState(prev => {
+            const newSplit = { ...prev.split };
+            cloudData.splits.forEach(s => {
+              if (s.day_of_week && Array.isArray(s.target_muscles)) {
+                newSplit[s.day_of_week] = s.target_muscles;
+              }
+            });
 
-          const newMessMenu = { ...state.messMenu };
-          cloudData.meals.forEach(m => {
-            if (m.day_of_week && m.meal_type && newMessMenu[m.day_of_week]) {
-              newMessMenu[m.day_of_week][m.meal_type] = m.food_items;
-            }
-          });
+            const newMessMenu = { ...prev.messMenu };
+            cloudData.meals.forEach(m => {
+              if (m.day_of_week && m.meal_type && newMessMenu[m.day_of_week]) {
+                newMessMenu[m.day_of_week][m.meal_type] = m.food_items;
+              }
+            });
 
-          update({
-            fitnessGoal: cloudData.profile?.fitness_goal || state.fitnessGoal,
-            dietPref: cloudData.profile?.diet_pref || state.dietPref,
-            targetProtein: cloudData.profile?.target_protein || state.targetProtein,
-            split: newSplit,
-            messMenu: newMessMenu,
+            return {
+              ...prev,
+              fitnessGoal: cloudData.profile?.fitness_goal || prev.fitnessGoal,
+              dietPref: cloudData.profile?.diet_pref || prev.dietPref,
+              targetProtein: cloudData.profile?.target_protein || prev.targetProtein,
+              split: newSplit,
+              messMenu: newMessMenu,
+            };
           });
           showToast('Loaded profile from cloud', 'success');
         }
@@ -150,7 +152,7 @@ export function AppProvider({ children }) {
     return () => {
       active = false;
     };
-  }, [user, isConfigured]);
+  }, [user, isConfigured, showToast]);
 
   const value = {
     state,

@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
 import { Utensils, Coffee, Cookie, Moon, Clock, Edit3, Camera, Flame, Zap } from 'lucide-react';
 import { useApp } from '../../context/AppContext.jsx';
 import { estimateDayMacros, estimateMealMacros } from '../../nutrition.js';

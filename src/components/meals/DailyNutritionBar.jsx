@@ -1,5 +1,5 @@
 import React from 'react';
-import { Zap, Flame } from 'lucide-react';
+import { Zap } from 'lucide-react';
 
 export default function DailyNutritionBar({ dayMacros, day, isHighlightNonVeg }) {
   const isNonVegDay = dayMacros.isNonVegDay;

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Dumbbell, Plus, Check, Moon, Timer, Trash2, Flame } from 'lucide-react';
+import { Plus, Check, Moon, Timer, Trash2, Flame } from 'lucide-react';
 import { useApp } from '../../context/AppContext.jsx';
 import RestTimerModal from './RestTimerModal.jsx';
 

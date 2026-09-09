@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
 import { Package, Plus, Trash2, Check, Sparkles, ChefHat } from 'lucide-react';
 import { ROOM_ITEMS } from '../../data.js';
 import { useApp } from '../../context/AppContext.jsx';
@@ -7,9 +6,6 @@ import { useApp } from '../../context/AppContext.jsx';
 export default function RoomInventoryView() {
   const { state, update, showToast } = useApp();
   const [newItem, setNewItem] = useState('');
-  const [activeCategory, setActiveCategory] = useState('All');
-
-  const categories = ['All', 'Supplements', 'Carbs & Oats', 'Healthy Fats & Nuts', 'Fruits'];
 
   const handleTogglePreset = (item) => {
     let newItems;

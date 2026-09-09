@@ -1,6 +1,6 @@
 import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle2, AlertCircle, Info, Sparkles } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
 
 export default function Toast({ toast }) {
   if (!toast) return null;

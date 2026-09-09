@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { CloudUpload, Check, X, Database, ArrowRight } from 'lucide-react';
+import { CloudUpload, Check, Database } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { migrateLegacyDataToSupabase } from '../../lib/cloudSync.js';
 import { useApp } from '../../context/AppContext.jsx';

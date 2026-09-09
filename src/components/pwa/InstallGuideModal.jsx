@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, Smartphone, Laptop, Download, Check, Share2 } from 'lucide-react';
+import { X, Smartphone, Laptop, Download, Share2 } from 'lucide-react';
 
 export default function InstallGuideModal({ isOpen, onClose }) {
   const [tab, setTab] = useState('android'); // 'android' | 'ios' | 'desktop'

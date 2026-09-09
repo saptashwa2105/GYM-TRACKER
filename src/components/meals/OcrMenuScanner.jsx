@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, UploadCloud, FileText, CheckCircle2, AlertCircle, Sparkles, RefreshCw } from 'lucide-react';
+import { X, UploadCloud, CheckCircle2, Sparkles } from 'lucide-react';
 import { extractMenuWithTesseract } from '../../ocr.js';
 import { useApp } from '../../context/AppContext.jsx';
-import { SAMPLE_VEG_MENU, SAMPLE_NONVEG_MENU } from '../../data.js';
+import { SAMPLE_VEG_MENU } from '../../data.js';
 
 export default function OcrMenuScanner({ isOpen, onClose }) {
   const { update, showToast } = useApp();
@@ -12,7 +12,6 @@ export default function OcrMenuScanner({ isOpen, onClose }) {
   const [scanning, setScanning] = useState(false);
   const [ocrProgress, setOcrProgress] = useState(0);
   const [extractedMenu, setExtractedMenu] = useState(null);
-  const [errorMsg, setErrorMsg] = useState(null);
 
   if (!isOpen) return null;
 
@@ -21,7 +20,6 @@ export default function OcrMenuScanner({ isOpen, onClose }) {
     if (selected) {
       setFile(selected);
       setPreviewUrl(URL.createObjectURL(selected));
-      setErrorMsg(null);
     }
   };
 
@@ -29,7 +27,6 @@ export default function OcrMenuScanner({ isOpen, onClose }) {
     if (!file) return;
     setScanning(true);
     setOcrProgress(10);
-    setErrorMsg(null);
 
     try {
       // Run tesseract OCR

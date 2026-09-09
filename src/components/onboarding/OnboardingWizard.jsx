@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Dumbbell, Utensils, Package, ChevronRight, ChevronLeft, Salad, Beef, Flame, Sparkles, Check } from 'lucide-react';
-import { DAYS, MUSCLE_GROUPS, ROOM_ITEMS, DEFAULT_SPLIT } from '../../data.js';
+import { Dumbbell, ChevronRight, ChevronLeft, Salad, Beef, Flame, Check } from 'lucide-react';
+import { DAYS, MUSCLE_GROUPS, ROOM_ITEMS } from '../../data.js';
 
 export default function OnboardingWizard({ state, update, onComplete }) {
   const [step, setStep] = useState(state.onboardingStep || 0);

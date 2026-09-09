@@ -2,7 +2,7 @@ import React from 'react';
 import { Flame, Zap, ShieldAlert } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-export default function AngerMeter({ level = 0, isMaxed = false }) {
+export default function AngerMeter({ level = 0 }) {
   // level is 0 to 100
   const clampedLevel = Math.min(100, Math.max(0, level));
 

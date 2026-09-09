@@ -50,7 +50,7 @@ function createMockClient() {
         }
         return { data: { user: null }, error: null };
       },
-      async signInWithPassword({ email, password }) {
+      async signInWithPassword({ email, _password }) {
         const user = {
           id: 'mock-user-123',
           email: email || 'demo@gymforge.dev',
@@ -61,7 +61,7 @@ function createMockClient() {
         listeners.forEach(cb => cb('SIGNED_IN', { user, access_token: 'mock-token' }));
         return { data: { user, session: { user } }, error: null };
       },
-      async signUp({ email, password, options }) {
+      async signUp({ email, _password, options }) {
         const user = {
           id: 'mock-user-123',
           email: email || 'demo@gymforge.dev',
@@ -90,7 +90,6 @@ function createMockClient() {
       },
       onAuthStateChange(callback) {
         listeners.push(callback);
-        // Dispatch current state
         this.getSession().then(({ data }) => {
           if (data?.session) callback('INITIAL_SESSION', data.session);
         });
@@ -106,7 +105,7 @@ function createMockClient() {
         };
       },
     },
-    from(table) {
+    from(_table) {
       return {
         select() {
           return {

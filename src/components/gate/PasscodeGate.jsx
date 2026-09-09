@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Dumbbell, Lock, Unlock, Zap, Shield, KeyRound, Sparkles, Delete, RefreshCcw } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Dumbbell, Lock, Unlock, KeyRound, Sparkles, Delete } from 'lucide-react';
 import AngerMeter from './AngerMeter.jsx';
 
 const DEFAULT_PIN = '1234';
@@ -89,14 +89,12 @@ export default function PasscodeGate({ onUnlock }) {
         handleDelete();
       } else if (e.key === 'Escape' || e.key === 'c' || e.key === 'C') {
         handleClear();
-      } else if (e.key === 'Enter' && pin.length === 4) {
-        // Trigger auto verification handled by handleDigit
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleDigit, handleDelete, handleClear, pin]);
+  }, [handleDigit, handleDelete, handleClear]);
 
   return (
     <div className="fixed inset-0 z-50 bg-[#0a0a0c] flex flex-col items-center justify-between p-5 overflow-y-auto min-h-screen select-none">
@@ -168,7 +166,7 @@ export default function PasscodeGate({ onUnlock }) {
 
         {/* Anger Meter Visualizer */}
         <div className="w-full mb-5">
-          <AngerMeter level={anger} isMaxed={anger >= 90} />
+          <AngerMeter level={anger} />
         </div>
 
         {/* PIN Dots Display */}

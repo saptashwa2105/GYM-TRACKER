@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, Save, Sparkles, Coffee, Utensils, Cookie, Moon } from 'lucide-react';
+import { X, Save, Coffee, Utensils, Cookie, Moon } from 'lucide-react';
 import { MEALS, SAMPLE_VEG_MENU, SAMPLE_NONVEG_MENU } from '../../data.js';
 import { useApp } from '../../context/AppContext.jsx';
 

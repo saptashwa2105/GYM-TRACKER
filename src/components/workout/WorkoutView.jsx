@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Dumbbell, Calendar, Flame } from 'lucide-react';
+import { Calendar, Flame } from 'lucide-react';
 import WorkoutLogger from './WorkoutLogger.jsx';
 import WorkoutPlanner from './WorkoutPlanner.jsx';
 import { useApp } from '../../context/AppContext.jsx';

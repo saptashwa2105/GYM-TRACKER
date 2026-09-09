@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { X, Play, Pause, RotateCcw, Timer, Zap, Check } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Timer } from 'lucide-react';
 
 export default function RestTimerModal({ isOpen, onClose, defaultSeconds = 60 }) {
   const [secondsLeft, setSecondsLeft] = useState(defaultSeconds);

@@ -1,6 +1,5 @@
 import React from 'react';
-import { motion } from 'framer-motion';
-import { Dumbbell, Utensils, Zap, Flame, Package, ChefHat, ArrowRight, CheckCircle, Clock, ShieldCheck, Plus } from 'lucide-react';
+import { Dumbbell, Utensils, Zap, Package, ChefHat, ArrowRight } from 'lucide-react';
 import { useApp } from '../../context/AppContext.jsx';
 import { estimateDayMacros, calculateProteinGap, getGoalTargets } from '../../nutrition.js';
 
