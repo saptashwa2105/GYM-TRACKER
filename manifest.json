@@ -1,0 +1,25 @@
+{
+  "name": "GymForge — Workout & Diet Tracker",
+  "short_name": "GymForge",
+  "description": "Your personalized gym workout and hostel diet tracker. Track workouts, meals, and room recipes.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0c0c0f",
+  "theme_color": "#39FF14",
+  "orientation": "portrait",
+  "categories": ["fitness", "health", "lifestyle"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
